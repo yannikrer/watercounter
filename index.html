@@ -7,48 +7,44 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
-      --primary: #00acc1;
-      --secondary: #006064;
-      --bg: #f0fdfc;
-      --text: #004d40;
+      --primary: #0288d1;
+      --secondary: #01579b;
+      --bg: #e1f5fe;
+      --text: #003c8f;
       --card: #ffffff;
-      --glass-bg: rgba(255, 255, 255, 0.6);
       --radius: 1rem;
     }
 
     body {
       margin: 0;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(to bottom, var(--bg), #b2ebf2);
+      font-family: 'Segoe UI', sans-serif;
+      background: var(--bg);
       color: var(--text);
       display: flex;
       flex-direction: column;
       align-items: center;
-      min-height: 100vh;
       padding: 1rem;
     }
 
     h1 {
       font-size: 2rem;
-      color: var(--secondary);
-      margin-bottom: 0.5rem;
+      margin-bottom: 1rem;
     }
 
     .card {
       background: var(--card);
       border-radius: var(--radius);
-      padding: 1rem;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+      padding: 1.5rem;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
       width: 100%;
-      max-width: 400px;
-      margin-bottom: 1rem;
+      max-width: 500px;
+      margin: 1rem 0;
     }
 
-    #daily-summary, #average-summary {
-      font-size: 1rem;
-      font-weight: 600;
+    .summary {
       text-align: center;
-      margin: 0.5rem 0;
+      font-weight: 600;
+      font-size: 1rem;
     }
 
     #glasses-container {
@@ -61,10 +57,9 @@
     .glass {
       width: 70px;
       height: 100px;
-      flex: 0 0 auto;
       border: 2px solid var(--primary);
       border-radius: 0 0 15px 15px;
-      background: var(--glass-bg);
+      background: rgba(0, 172, 193, 0.1);
       position: relative;
       overflow: hidden;
       display: flex;
@@ -72,8 +67,6 @@
       justify-content: center;
       cursor: pointer;
     }
-
-    .glass:hover { transform: scale(1.05); }
 
     .fill {
       position: absolute;
@@ -96,274 +89,221 @@
       z-index: 2;
     }
 
+    .controls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+    }
+
     .btn-group {
       display: flex;
-      justify-content: center;
       gap: 0.5rem;
-      margin: 1rem 0;
       flex-wrap: wrap;
+      justify-content: center;
     }
 
-    .btn-group button {
-      padding: 0.6rem 1.2rem;
+    .btn-group button, select {
+      padding: 0.6rem 1rem;
+      border-radius: var(--radius);
+      border: none;
       background: var(--secondary);
       color: white;
-      border: none;
-      border-radius: var(--radius);
-      cursor: pointer;
       font-weight: 600;
+      cursor: pointer;
     }
 
-    .btn-group button:hover {
+    .btn-group button:hover,
+    select:hover {
       background: var(--primary);
-    }
-
-    #week-label {
-      font-weight: bold;
-      margin: 0.5rem 0;
-      text-align: center;
     }
 
     canvas {
       width: 100% !important;
-      max-width: 400px;
       height: auto !important;
     }
   </style>
 </head>
 <body>
-  <h1>Wasserzähler</h1>
+  <h1>💧 Wasserzähler</h1>
+
   <div class="card">
-    <p id="daily-summary">Heute: 0 Gläser, 0 ml (0.00 L)</p>
-    <p id="average-summary">Durchschnitt: 0 ml (0.00 L)</p>
+    <div class="summary" id="daily-summary">Heute: 0 Gläser, 0 ml (0.00 L)</div>
+    <div class="summary" id="average-summary">Durchschnitt: 0 ml (0.00 L)</div>
   </div>
+
+  <div class="card controls">
+    <label for="day-select">Bearbeite Tag:</label>
+    <select id="day-select"></select>
+  </div>
+
   <div class="card" id="glasses-container"></div>
+
   <div class="card">
     <div class="btn-group">
       <button id="prev-week">← Vorherige Woche</button>
-      <span id="week-label">Diese Woche</span>
       <button id="next-week">Nächste Woche →</button>
     </div>
     <canvas id="chart"></canvas>
   </div>
-<script>
-  const parseVolume = v => {
-    const s = (v || '').toLowerCase().replace(',', '.').trim();
-    if (s.endsWith('l')) return parseFloat(s) * 1000;
-    if (s.endsWith('ml')) return parseFloat(s);
-    return parseFloat(s) || 0;
-  };
-  const formatVolume = ml => {
-    const l = ml / 1000;
-    return `${ml} ml (${l.toFixed(2)} L)`;
-  };
 
-  function setEditDay(date) {
-    localStorage.setItem('editDay', date.toLocaleDateString('de-CH'));
-  }
+  <script>
+    const ctx = document.getElementById('chart').getContext('2d');
+    const selectDay = document.getElementById('day-select');
+    const container = document.getElementById('glasses-container');
+    let chart, currentWeekOffset = 0;
+    let selectedDate = new Date();
 
-  function getEditDay() {
-    const s = localStorage.getItem('editDay');
-    if (!s) return null;
-    return new Date(s);
-  }
+    const parseVolume = v => {
+      const s = (v || '').toLowerCase().replace(',', '.').trim();
+      if (s.endsWith('l')) return parseFloat(s) * 1000;
+      if (s.endsWith('ml')) return parseFloat(s);
+      return parseFloat(s) || 0;
+    };
 
-  function clearEditDay() {
-    localStorage.removeItem('editDay');
-  }
+    const formatVolume = ml => `${ml} ml (${(ml / 1000).toFixed(2)} L)`;
 
-  const todayKey = () => {
-    const editDay = getEditDay();
-    const d = editDay ? editDay : new Date();
-    return d.toLocaleDateString('de-CH');
-  };
+    const dateKey = d => d.toLocaleDateString('de-CH');
 
-  const loadVols = () => {
-    try {
-      const data = JSON.parse(localStorage.getItem(todayKey()));
-      return Array.isArray(data) ? data : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const saveVols = arr => localStorage.setItem(todayKey(), JSON.stringify(arr));
-  const container = document.getElementById('glasses-container');
-  let chart;
-  const ctx = document.getElementById('chart').getContext('2d');
-
-  function renderGlasses() {
-    const vols = loadVols();
-    container.innerHTML = '';
-    vols.forEach((v, idx) => container.appendChild(createGlass(idx, true)));
-    container.appendChild(createGlass(vols.length, false));
-  }
-
-  function createGlass(idx, filled) {
-    const g = document.createElement('div');
-    g.className = 'glass'; g.dataset.idx = idx;
-    const fill = document.createElement('div'); fill.className = 'fill';
-    g.appendChild(fill);
-    if (filled) {
-      fill.style.height = '100%';
-      g.addEventListener('click', () => removeGlass(idx));
-    } else {
-      g.addEventListener('click', () => inputGlass(idx));
-    }
-    return g;
-  }
-
-  function removeGlass(idx) {
-    const vols = loadVols();
-    vols.splice(idx, 1);
-    saveVols(vols);
-    updateUI();
-  }
-
-  function inputGlass(idx) {
-    const g = container.children[idx];
-    if (g.querySelector('input')) return;
-    const input = document.createElement('input');
-    input.placeholder = 'z.B. 250ml';
-    g.appendChild(input);
-    input.focus();
-    input.addEventListener('blur', applyInput);
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
-    function applyInput() {
-      const val = parseVolume(input.value);
-      if (val > 0) {
-        const vols = loadVols();
-        vols.push(val);
-        saveVols(vols);
-      }
-      updateUI();
-    }
-  }
-
-  function sumForKey(key) {
-    try {
-      const arr = JSON.parse(localStorage.getItem(key));
-      return Array.isArray(arr) ? arr.reduce((a, b) => a + b, 0) : 0;
-    } catch {
-      return 0;
-    }
-  }
-
-  function calcTotalAverage() {
-    let total = 0;
-    let days = 0;
-    for (let i = 0; i < 365; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const key = d.toLocaleDateString('de-CH');
-      const sum = sumForKey(key);
-      if (sum > 0) {
-        total += sum;
-        days++;
-      }
-    }
-    const avg = days ? total / days : 0;
-    document.getElementById('average-summary').textContent = `Durchschnitt: ${formatVolume(Math.round(avg))}`;
-  }
-
-  let currentWeekOffset = 0;
-
-  function getWeekDates(offset = 0) {
-    const today = new Date();
-    const monday = new Date(today);
-    const currentDay = today.getDay();
-    const distanceToMonday = (currentDay + 6) % 7;
-    monday.setDate(today.getDate() - distanceToMonday + offset * 7);
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      days.push(d);
-    }
-    return days;
-  }
-
-  function formatDateShort(d) {
-    return d.toLocaleDateString('de-CH', { weekday: 'short', day: 'numeric', month: 'numeric' });
-  }
-
-  function updateChartForWeek(offset = 0) {
-    const weekDates = getWeekDates(offset);
-    const labels = weekDates.map(formatDateShort);
-    const data = weekDates.map(d => {
-      const key = d.toLocaleDateString('de-CH');
-      return sumForKey(key);
-    });
-    if (chart) chart.destroy();
-    chart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          label: 'ml pro Tag',
-          data,
-          backgroundColor: '#00acc1'
-        }]
-      },
-      options: {
-        scales: { y: { beginAtZero: true } },
-        responsive: true,
-        plugins: { legend: { display: false } }
-      }
-    });
-
-    // Week label
-    const weekStart = weekDates[0];
-    const weekEnd = weekDates[6];
-    document.getElementById('week-label').textContent =
-      `KW ${getISOWeekNumber(weekStart)} (${weekStart.toLocaleDateString('de-CH')} – ${weekEnd.toLocaleDateString('de-CH')})`;
-
-    // Double-click to edit day
-    document.getElementById('chart').onclick = function(evt) {
-      const points = chart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
-      if (points.length > 0 && evt.detail === 2) {
-        const index = points[0].index;
-        const clickedDate = weekDates[index];
-        setEditDay(clickedDate);
-        updateUI();
+    const loadVols = (d = selectedDate) => {
+      try {
+        const data = JSON.parse(localStorage.getItem(dateKey(d)));
+        return Array.isArray(data) ? data : [];
+      } catch {
+        return [];
       }
     };
-  }
 
-  function getISOWeekNumber(d) {
-    const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-    const dayNum = date.getUTCDay() || 7;
-    date.setUTCDate(date.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-    return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
-  }
+    const saveVols = (arr, d = selectedDate) => {
+      localStorage.setItem(dateKey(d), JSON.stringify(arr));
+    };
 
-  document.getElementById('prev-week').addEventListener('click', () => {
-    currentWeekOffset--;
-    updateChartForWeek(currentWeekOffset);
-  });
+    const renderGlasses = () => {
+      const vols = loadVols();
+      container.innerHTML = '';
+      vols.forEach((v, i) => container.appendChild(createGlass(i, true)));
+      container.appendChild(createGlass(vols.length, false));
+    };
 
-  document.getElementById('next-week').addEventListener('click', () => {
-    currentWeekOffset++;
-    updateChartForWeek(currentWeekOffset);
-  });
+    const createGlass = (idx, filled) => {
+      const g = document.createElement('div');
+      g.className = 'glass';
+      const fill = document.createElement('div');
+      fill.className = 'fill';
+      g.appendChild(fill);
 
-  function updateUI() {
-    renderGlasses();
-    const vols = loadVols();
-    const cnt = vols.length;
-    const sum = vols.reduce((a, b) => a + b, 0);
-    document.getElementById('daily-summary').textContent =
-      `Heute: ${cnt} Gläser, ${formatVolume(sum)}`;
-    updateChartForWeek(currentWeekOffset);
-    calcTotalAverage();
-  }
+      if (filled) {
+        fill.style.height = '100%';
+        g.addEventListener('click', () => {
+          const vols = loadVols();
+          vols.splice(idx, 1);
+          saveVols(vols);
+          updateUI();
+        });
+      } else {
+        g.addEventListener('click', () => {
+          if (g.querySelector('input')) return;
+          const input = document.createElement('input');
+          input.placeholder = 'z.B. 250ml';
+          g.appendChild(input);
+          input.focus();
+          input.addEventListener('blur', () => {
+            const val = parseVolume(input.value);
+            if (val > 0) {
+              const vols = loadVols();
+              vols.push(val);
+              saveVols(vols);
+            }
+            updateUI();
+          });
+          input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') input.blur();
+          });
+        });
+      }
 
-  updateUI();
+      return g;
+    };
 
-  // Reset edit day when leaving the page
-  window.addEventListener('beforeunload', () => clearEditDay());
-</script>
+    const calcAverage = () => {
+      let total = 0, days = 0;
+      for (let i = 0; i < 365; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const vols = JSON.parse(localStorage.getItem(dateKey(d)) || '[]');
+        if (vols.length) {
+          total += vols.reduce((a, b) => a + b, 0);
+          days++;
+        }
+      }
+      const avg = days ? Math.round(total / days) : 0;
+      document.getElementById('average-summary').textContent = `Durchschnitt: ${formatVolume(avg)}`;
+    };
 
+    const updateChart = (offset = 0) => {
+      const weekDates = getWeekDates(offset);
+      const labels = weekDates.map(d => d.toLocaleDateString('de-CH', { weekday: 'short', day: 'numeric', month: 'numeric' }));
+      const data = weekDates.map(d => {
+        const vols = JSON.parse(localStorage.getItem(dateKey(d)) || '[]');
+        return vols.reduce((a, b) => a + b, 0);
+      });
+
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{ label: 'ml pro Tag', data, backgroundColor: '#0288d1' }]
+        },
+        options: {
+          scales: { y: { beginAtZero: true } },
+          plugins: { legend: { display: false } }
+        }
+      });
+
+      // Update select dropdown
+      selectDay.innerHTML = '';
+      weekDates.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.toISOString();
+        opt.textContent = d.toLocaleDateString('de-CH', { weekday: 'short', day: 'numeric', month: 'numeric' });
+        if (dateKey(d) === dateKey(selectedDate)) opt.selected = true;
+        selectDay.appendChild(opt);
+      });
+    };
+
+    const getWeekDates = (offset = 0) => {
+      const base = new Date();
+      const monday = new Date(base.setDate(base.getDate() - ((base.getDay() + 6) % 7) + offset * 7));
+      return [...Array(7)].map((_, i) => new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i));
+    };
+
+    selectDay.addEventListener('change', e => {
+      selectedDate = new Date(e.target.value);
+      updateUI();
+    });
+
+    document.getElementById('prev-week').addEventListener('click', () => {
+      currentWeekOffset--;
+      updateChart(currentWeekOffset);
+    });
+
+    document.getElementById('next-week').addEventListener('click', () => {
+      currentWeekOffset++;
+      updateChart(currentWeekOffset);
+    });
+
+    const updateUI = () => {
+      const vols = loadVols();
+      const sum = vols.reduce((a, b) => a + b, 0);
+      document.getElementById('daily-summary').textContent =
+        `${selectedDate.toLocaleDateString('de-CH')}: ${vols.length} Gläser, ${formatVolume(sum)}`;
+      renderGlasses();
+      updateChart(currentWeekOffset);
+      calcAverage();
+    };
+
+    updateUI();
+  </script>
 </body>
 </html>
